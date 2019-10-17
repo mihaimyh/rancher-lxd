@@ -8,29 +8,23 @@ Steps:
 
 ```bash
 sudo apt-get purge lxd lxd-client
-
 sudo snap install lxd
-
 echo "root:1000000:65536" | sudo tee -a /etc/subuid /etc/subgid
-
 sudo usermod -a -G lxd $USER
-
 newgrp lxd
-
 sudo lxd init --auto
-
 lxc network set lxdbr0 ipv6.address none
 ```
 
 > If you got an error when trying to execute any lxc/lxd commands be sure you add /snap/bin in your path:
 >
-> echo "export PATH="/snap/bin:$PATH"" >> ~/.bashrc
+> `echo "export PATH="/snap/bin:$PATH"" >> ~/.bashrc`
 
 ### 1.1 Production setup
 
 See <https://linuxcontainers.org/lxd/docs/master/production-setup>
 
-#### /etc/security/limits.conf
+#### 1.1.1 /etc/security/limits.conf
 
 ```bash
 soft nofile 1048576
@@ -41,7 +35,7 @@ soft memlock unlimited
 hard memlock unlimited
 ```
 
-#### /etc/sysctl.conf
+#### 1.1.2 /etc/sysctl.conf
 
 ```bash
 fs.inotify.max_queued_events 1048576
@@ -54,13 +48,13 @@ net.ipv6.neigh.default.gc_thresh3 8192
 kernel.keys.maxkeys 2000
 ```
 
-#### Network Bandwidth Tweaking
+#### 1.1.3 Network Bandwidth Tweaking
 
 If you have at least 1GbE NIC on your lxd host with a lot of local activity (container - container connections, or host - container connections), or you have 1GbE or better internet connection on your lxd host it worth play with txqueuelen. These settings work even better with 10GbE NIC.
 
-##### Server Changes
+##### 1.1.3.1 Server Changes
 
-###### txqueuelen
+###### 1.1.3.1.1 txqueuelen
 
 You need to change txqueuelen of your real NIC to 10000 (not sure about the best possible value for you), and change and change lxdbr0 interface txqueuelen to 10000.
 
@@ -68,7 +62,7 @@ In Debian-based distros you can change txqueuelen permanently in /etc/network/in
 You can add for ex.: `up ip link set eth0 txqueuelen 10000` to your interface configuration to set txqueuelen value on boot.
 You could set it txqueuelen temporary (for test purpose) with `ifconfig <interface> txqueuelen 10000`
 
-###### /etc/sysctl.conf
+###### 1.1.3.1.2 /etc/sysctl.conf
 
 You also need to increase `net.core.netdev_max_backlog` value.
 
@@ -80,7 +74,7 @@ You set netdev_max_backlog temporary (for test purpose) with echo 182757 > /proc
 >
 > For example I use this values `net.ipv4.tcp_mem = 182757 243679 365514`
 
-##### Containers changes
+##### 1.1.3.2 Containers changes
 
 You also need to change txqueuelen value for all you ethernet interfaces in containers.
 In Debian-based distros you can change txqueuelen permanently in /etc/network/interfaces
@@ -92,7 +86,7 @@ You can add for ex.: `up ip link set eth0 txqueuelen 10000` to your interface co
 
 ### 1.3. Create profiles
 
-See yamls [yamls](yamls\3_profile.yaml)
+See yamls [yamls](yamls/3_profile.yaml)
 
 ## 2. Docker
 
@@ -157,6 +151,23 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
+#### 2.4.3 Set MountFlags on every node
+
+On every node edit `/etc/systemd/system/multi-user.target.wants/docker.service` and add:
+
+```bash
+[Service]
+...
+MountFlags=shared
+...
+```
+
+Restart docker
+
+`sudo systemctl daemon-reload`
+
+`sudo service docker restart`
+
 ## 3. Rancher
 
 First of all we need to install few CLI tools required for this installation:
@@ -189,7 +200,6 @@ We need to create 3 worker nodes and 1 load balancer for RKE install.
 lxc launch ubuntu:18.04 k-worker1 -p k8s-worker
 lxc launch ubuntu:18.04 k-worker2 -p k8s-worker
 lxc launch ubuntu:18.04 k-worker3 -p k8s-worker
-lxc launch ubuntu:18.04 proxy -p k8s-master
 ```
 
 #### 3.1.2 Load balancer
@@ -236,6 +246,36 @@ docker run -d --restart=unless-stopped \
   -p 80:80 -p 443:443 \
   -v /etc/nginx.conf:/etc/nginx/nginx.conf \
   nginx:1.14
+```
+
+#### 3.1.2 Set-up ssh on every node
+
+We should also set ssh keys for every node so rke can be able to ssh into them:
+
+```bash
+ssh-keygen -t rsa
+lxc file push ~/.ssh/id_rsa.pub k-worker1/home/ubuntu/.ssh/authorized_keys
+lxc file push ~/.ssh/id_rsa.pub k-worker2/home/ubuntu/.ssh/authorized_keys
+lxc file push ~/.ssh/id_rsa.pub k-worker3/home/ubuntu/.ssh/authorized_keys
+```
+
+Rke needs to use ssh forwarding and tunneling, so we must edit `/etc/ssh/sshd_config` on every node:
+
+```bash
+lxc exec k-worker1 bash
+echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
+echo "PermitTunnel yes" >> /etc/ssh/sshd_config
+service sshd restart
+
+lxc exec k-worker2 bash
+echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
+echo "PermitTunnel yes" >> /etc/ssh/sshd_config
+service sshd restart
+
+lxc exec k-worker3 bash
+echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
+echo "PermitTunnel yes" >> /etc/ssh/sshd_config
+service sshd restart
 ```
 
 ### 3.2 Install Kubernetes with RKE
