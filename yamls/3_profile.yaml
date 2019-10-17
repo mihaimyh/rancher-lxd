@@ -19,6 +19,6 @@ devices:
     type: nic
   root:
     path: /
-    pool: default
+    pool: lxd-main
     type: disk
 name: main-lxd-profile
